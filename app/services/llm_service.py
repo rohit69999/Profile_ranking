@@ -15,6 +15,7 @@ from ..parsers.pypdf_parser import PyPDFParser
 from ..parsers.docx_parser import DocxParser
 from ..parsers.llama_parser import LlamaParser
 from ..config.settings import Settings
+import streamlit as st
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -22,7 +23,8 @@ logging.basicConfig(level=logging.INFO)
 class LLMService:
     def __init__(self, model: str):
         self.model = model
-        self.openai_api_key = os.getenv("OPENAI_API_KEY")
+        # self.openai_api_key = os.getenv("OPENAI_API_KEY")
+        self.openai_api_key = st.secrets ["OPENAI_API_KEY"]
         self.llm = self._initialize_llm()
         self.current_month_year = datetime.today().strftime("%B %Y")
         self.good_characteristics = []
