@@ -1,13 +1,11 @@
 import streamlit as st
 from app.services.ranking_service import RankingService
-import pandas as pd
 from app.parsers.docx_parser import DocxParser
 from app.parsers.pypdf_parser import PyPDFParser
 from app.services.cleanup_service import CleanupService
 from app.config.settings import Settings
 import tempfile
 import os
-import shutil 
 import logging
 
 def save_uploaded_files(uploaded_files):
@@ -16,7 +14,7 @@ def save_uploaded_files(uploaded_files):
     
     for uploaded_file in uploaded_files:
         file_path = os.path.join(temp_dir, uploaded_file.name)
-        with open(file_path, "wb") as f:
+        with open(file_path, "wb") as f:    
             f.write(uploaded_file.getbuffer())
     
     return temp_dir
@@ -49,13 +47,18 @@ def main():
         key="resumes"
     )
     
-    # Sample good resumes section
+    # Sample good resumes section with file limit
     good_resumes = st.file_uploader(
-        "Upload sample good resumes",
+        "Upload sample good resumes (maximum 5 files)",
         type=["pdf", "doc", "docx"],
         accept_multiple_files=True,
         key="good_resumes"
     )
+
+    # Add validation right after the file uploader
+    if good_resumes and len(good_resumes) > 5:
+        st.error("Please upload a maximum of 5 sample resumes.")
+        good_resumes = good_resumes[:5]  # Keep only first 5 files
 
     # Sidebar configuration
     st.sidebar.header("Scoring Configuration")
@@ -184,10 +187,11 @@ def main():
                     # Process good resumes first if provided
                     if good_resumes:
                         num_resumes = len(good_resumes)
-                        if num_resumes > 5:
-                            st.warning(f"Note: Only the first 5 sample resumes will be processed (you uploaded {num_resumes})")
+                        logging.info(f"Number of good sample resumes uploaded: {num_resumes}")
                         good_dir = save_uploaded_files(good_resumes)
+                        logging.info(f"Good resumes saved to directory: {good_dir}")
                     else:
+                        logging.info("No good sample resumes uploaded")
                         good_dir = None
                         
                     # Convert scoring weights
@@ -207,9 +211,13 @@ def main():
                         ranking_priority=priority_order
                     )
                     
-                    # Set example directory if good resumes were provided
+                    # Set example directory and analyze example resumes first
                     if good_dir:
-                        ranker.example_good_dir = good_dir
+                        logging.info("Analyzing good sample resumes...")
+                        # Pass the job description here
+                        ranker.analyze_example_resumes(good_dir, job_description)
+                        if not ranker.llm_service.good_characteristics:
+                            st.warning("Failed to extract characteristics from good resumes")
                     
                     # Process all resumes
                     results_df = ranker.process_resumes(temp_dir, job_description)

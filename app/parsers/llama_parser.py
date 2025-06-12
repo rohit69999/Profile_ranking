@@ -14,7 +14,7 @@ class LlamaParser(BaseParser):
         try:
             # api_key = os.getenv("LLAMA_CLOUD_API_KEY")
             api_key = st.secrets ["LLAMA_CLOUD_API_KEY"]
-            
+
             if not api_key:
                 raise ValueError("Missing Llama Cloud API Key")
 
@@ -32,6 +32,39 @@ class LlamaParser(BaseParser):
             
             if not text.strip():
                 logging.warning(f"Extracted empty content from {file_path}")
+                return {"content": "", "parser_used": "LlamaParse"}
+
+            return {
+                "content": text,
+                "parser_used": "LlamaParse"
+            }
+
+        except Exception as e:
+            logging.error(f"LlamaParse failed to read {file_path}: {str(e)}")
+            return {"content": "", "parser_used": "LlamaParse"}
+
+    async def aparse(self, file_path: str) -> Dict[str, str]:
+        """Async version of parse method"""
+        try:
+            # api_key = os.getenv("LLAMA_CLOUD_API_KEY")
+            api_key = st.secrets ["LLAMA_CLOUD_API_KEY"]
+
+            if not api_key:
+                raise ValueError("Missing Llama Cloud API Key")
+
+            parser = LlamaParse(api_key=api_key, result_type="text")
+
+            documents = await parser.aload_data(file_path=file_path)
+
+            if not documents:
+                logging.error(f"LlamaParse failed to read {file_path}")
+                return {"content": "", "parser_used": "LlamaParse"}
+
+            # Combine text from all pages
+            text = "\n".join(str(doc.text) for doc in documents if hasattr(doc, 'text'))
+
+            if not text.strip():
+                logging.warning(f"No text content extracted from {file_path}")
                 return {"content": "", "parser_used": "LlamaParse"}
 
             return {

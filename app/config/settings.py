@@ -1,5 +1,4 @@
 from typing import Dict
-from datetime import datetime
 
 class Settings:
     DEFAULT_WEIGHTS: Dict[str, float] = {
