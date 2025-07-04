@@ -259,6 +259,9 @@ def display_ranking_results(results_df, key_prefix=""):
         results_df: DataFrame containing the ranking results
         key_prefix: Optional prefix to make widget keys unique when called multiple times
     """
+    # Create a unique prefix for all widget keys in this function
+    widget_prefix = f"{key_prefix}_" if key_prefix else ""
+    
     st.subheader("Rankings:")
     
     # Sort by total_score in descending order (highest first)
@@ -271,15 +274,15 @@ def display_ranking_results(results_df, key_prefix=""):
     column_order = ['Rank'] + [col for col in results_df.columns if col != 'Rank']
     results_df = results_df[column_order]
     
-    # Add filter controls
+    # Add filter controls with prefixed keys
     col1, col2 = st.columns(2)
     with col1:
         show_top_n = st.number_input(
             "Show Top N Candidates", 
             min_value=1, 
             max_value=len(results_df),
-            value=len(results_df),
-            key=f"show_top_n_{key_prefix}" if key_prefix else "show_top_n"
+            value=min(10, len(results_df)),  # Default to showing top 10 or all if less than 10
+            key=f"{widget_prefix}show_top_n"
         )
     with col2:
         min_score = st.slider(
@@ -287,7 +290,8 @@ def display_ranking_results(results_df, key_prefix=""):
             min_value=float(50),
             max_value=float(100),
             value=float(results_df['total_score'].min()),
-            key=f"min_score_filter_{key_prefix}" if key_prefix else "min_score_filter"
+            step=1.0,
+            key=f"{widget_prefix}min_score_filter"
         )
 
     # Apply filters
@@ -296,7 +300,7 @@ def display_ranking_results(results_df, key_prefix=""):
     # Format display DataFrame
     display_df = format_display_dataframe(display_df)
     
-    # Display results
+    # Display results with a unique key
     st.dataframe(
         display_df,
         column_config={
@@ -305,7 +309,8 @@ def display_ranking_results(results_df, key_prefix=""):
         },
         hide_index=True,
         use_container_width=True,
-        height=min(800, 100 + len(display_df) * 35)  # Dynamic height based on number of rows
+        height=min(800, 100 + len(display_df) * 35),  # Dynamic height based on number of rows
+        key=f"{widget_prefix}results_dataframe"  # Add unique key for the dataframe
     )
     
     add_download_buttons(display_df, results_df)
