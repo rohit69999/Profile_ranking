@@ -14,43 +14,43 @@ import tempfile
 import os
 import logging
 import shutil
-# TRACING_ENABLED = False
-# try:
-#     from phoenix.otel import register
-#     from openinference.instrumentation.openai import OpenAIInstrumentor
+TRACING_ENABLED = False
+try:
+    from phoenix.otel import register
+    from openinference.instrumentation.openai import OpenAIInstrumentor
 
-#     # Set environment variables for Phoenix
-#     # os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"api_key={os.getenv('OTEL_EXPORTER_OTLP_HEADERS')}"
-#     # os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={os.getenv('PHOENIX_CLIENT_HEADERS')}"
-#     # os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = os.getenv('PHOENIX_COLLECTOR_ENDPOINT')
+    # Set environment variables for Phoenix
+    # os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"api_key={os.getenv('OTEL_EXPORTER_OTLP_HEADERS')}"
+    # os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={os.getenv('PHOENIX_CLIENT_HEADERS')}"
+    # os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = os.getenv('PHOENIX_COLLECTOR_ENDPOINT')
 
-#     os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"api_key={st.secrets['OTEL_EXPORTER_OTLP_HEADERS']}"
-#     os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={st.secrets['PHOENIX_CLIENT_HEADERS']}"
-#     os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = st.secrets['PHOENIX_COLLECTOR_ENDPOINT']
+    os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"api_key={st.secrets['OTEL_EXPORTER_OTLP_HEADERS']}"
+    os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={st.secrets['PHOENIX_CLIENT_HEADERS']}"
+    os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = st.secrets['PHOENIX_COLLECTOR_ENDPOINT']
 
-#     try:
-#         tracer_provider = register(
-#             project_name="Profile Ranking System",
-#             endpoint=st.secrets['OTEL_EXPORTER_OTLP_ENDPOINT'],
-#             batch=True,
-#             auto_instrument=True
-#         )
+    try:
+        tracer_provider = register(
+            project_name="Profile Ranking System",
+            endpoint=st.secrets['OTEL_EXPORTER_OTLP_ENDPOINT'],
+            batch=True,
+            auto_instrument=True
+        )
 
-#         # Instrument OpenAI
-#         OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
-#         TRACING_ENABLED = True
-#         logging.info("OpenTelemetry tracing initialized successfully")
+        # Instrument OpenAI
+        OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
+        TRACING_ENABLED = True
+        logging.info("OpenTelemetry tracing initialized successfully")
 
-#     except Exception as e:
-#         logging.error("Failed to initialize OpenTelemetry tracing", exc_info=True)
-#         tracer_provider = None
+    except Exception as e:
+        logging.error("Failed to initialize OpenTelemetry tracing", exc_info=True)
+        tracer_provider = None
 
-# except ImportError:
-#     logging.warning("Phoenix tracing packages not found, tracing disabled")
-#     tracer_provider = None
-# except Exception as e:
-#     logging.error("Unexpected error during tracing setup", exc_info=True)
-#     tracer_provider = None
+except ImportError:
+    logging.warning("Phoenix tracing packages not found, tracing disabled")
+    tracer_provider = None
+except Exception as e:
+    logging.error("Unexpected error during tracing setup", exc_info=True)
+    tracer_provider = None
 
 CSS_STYLES = """
 <style>
