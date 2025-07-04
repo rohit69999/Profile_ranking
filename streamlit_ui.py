@@ -14,44 +14,43 @@ import tempfile
 import os
 import logging
 import shutil
-import streamlit as st
-TRACING_ENABLED = False
-try:
-    from phoenix.otel import register
-    from openinference.instrumentation.openai import OpenAIInstrumentor
+# TRACING_ENABLED = False
+# try:
+#     from phoenix.otel import register
+#     from openinference.instrumentation.openai import OpenAIInstrumentor
 
-    # Set environment variables for Phoenix
-    # os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"api_key={os.getenv('OTEL_EXPORTER_OTLP_HEADERS')}"
-    # os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={os.getenv('PHOENIX_CLIENT_HEADERS')}"
-    # os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = os.getenv('PHOENIX_COLLECTOR_ENDPOINT')
+#     # Set environment variables for Phoenix
+#     # os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"api_key={os.getenv('OTEL_EXPORTER_OTLP_HEADERS')}"
+#     # os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={os.getenv('PHOENIX_CLIENT_HEADERS')}"
+#     # os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = os.getenv('PHOENIX_COLLECTOR_ENDPOINT')
 
-    os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"api_key={st.secrets['OTEL_EXPORTER_OTLP_HEADERS']}"
-    os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={st.secrets['PHOENIX_CLIENT_HEADERS']}"
-    os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = st.secrets['PHOENIX_COLLECTOR_ENDPOINT']
+#     os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"api_key={st.secrets['OTEL_EXPORTER_OTLP_HEADERS']}"
+#     os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={st.secrets['PHOENIX_CLIENT_HEADERS']}"
+#     os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = st.secrets['PHOENIX_COLLECTOR_ENDPOINT']
 
-    try:
-        tracer_provider = register(
-            project_name="Profile Ranking System",
-            endpoint=st.secrets['OTEL_EXPORTER_OTLP_ENDPOINT'],
-            batch=True,
-            auto_instrument=True
-        )
+#     try:
+#         tracer_provider = register(
+#             project_name="Profile Ranking System",
+#             endpoint=st.secrets['OTEL_EXPORTER_OTLP_ENDPOINT'],
+#             batch=True,
+#             auto_instrument=True
+#         )
 
-        # Instrument OpenAI
-        OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
-        TRACING_ENABLED = True
-        logging.info("OpenTelemetry tracing initialized successfully")
+#         # Instrument OpenAI
+#         OpenAIInstrumentor().instrument(tracer_provider=tracer_provider)
+#         TRACING_ENABLED = True
+#         logging.info("OpenTelemetry tracing initialized successfully")
 
-    except Exception as e:
-        logging.error("Failed to initialize OpenTelemetry tracing", exc_info=True)
-        tracer_provider = None
+#     except Exception as e:
+#         logging.error("Failed to initialize OpenTelemetry tracing", exc_info=True)
+#         tracer_provider = None
 
-except ImportError:
-    logging.warning("Phoenix tracing packages not found, tracing disabled")
-    tracer_provider = None
-except Exception as e:
-    logging.error("Unexpected error during tracing setup", exc_info=True)
-    tracer_provider = None
+# except ImportError:
+#     logging.warning("Phoenix tracing packages not found, tracing disabled")
+#     tracer_provider = None
+# except Exception as e:
+#     logging.error("Unexpected error during tracing setup", exc_info=True)
+#     tracer_provider = None
 
 CSS_STYLES = """
 <style>
@@ -179,7 +178,7 @@ def get_scoring_configuration():
 
     return scoring_weights, priority_order
 
-def add_download_buttons(display_df, results_df):
+def add_download_buttons(display_df, results_df, key_prefix=""):
     """Add download buttons for filtered and full rankings"""
     col1, col2 = st.columns(2)
     with col1:
@@ -190,7 +189,7 @@ def add_download_buttons(display_df, results_df):
             data=csv_filtered,
             file_name="filtered_rankings.csv",
             mime="text/csv",
-            key="download_filtered"
+            key=f"{key_prefix}_download_filtered"
         )
         st.markdown('</div>', unsafe_allow_html=True)
     with col2:
@@ -201,7 +200,7 @@ def add_download_buttons(display_df, results_df):
             data=csv_full,
             file_name="all_rankings.csv",
             mime="text/csv",
-            key="download_full"
+            key=f"{key_prefix}_download_full"
         )
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -259,9 +258,6 @@ def display_ranking_results(results_df, key_prefix=""):
         results_df: DataFrame containing the ranking results
         key_prefix: Optional prefix to make widget keys unique when called multiple times
     """
-    # Create a unique prefix for all widget keys in this function
-    widget_prefix = f"{key_prefix}_" if key_prefix else ""
-    
     st.subheader("Rankings:")
     
     # Sort by total_score in descending order (highest first)
@@ -274,15 +270,15 @@ def display_ranking_results(results_df, key_prefix=""):
     column_order = ['Rank'] + [col for col in results_df.columns if col != 'Rank']
     results_df = results_df[column_order]
     
-    # Add filter controls with prefixed keys
+    # Add filter controls
     col1, col2 = st.columns(2)
     with col1:
         show_top_n = st.number_input(
             "Show Top N Candidates", 
             min_value=1, 
             max_value=len(results_df),
-            value=min(10, len(results_df)),  # Default to showing top 10 or all if less than 10
-            key=f"{widget_prefix}show_top_n"
+            value=len(results_df),
+            key=f"show_top_n_{key_prefix}" if key_prefix else "show_top_n"
         )
     with col2:
         min_score = st.slider(
@@ -290,8 +286,7 @@ def display_ranking_results(results_df, key_prefix=""):
             min_value=float(50),
             max_value=float(100),
             value=float(results_df['total_score'].min()),
-            step=1.0,
-            key=f"{widget_prefix}min_score_filter"
+            key=f"min_score_filter_{key_prefix}" if key_prefix else "min_score_filter"
         )
 
     # Apply filters
@@ -300,7 +295,7 @@ def display_ranking_results(results_df, key_prefix=""):
     # Format display DataFrame
     display_df = format_display_dataframe(display_df)
     
-    # Display results with a unique key
+    # Display results
     st.dataframe(
         display_df,
         column_config={
@@ -309,11 +304,10 @@ def display_ranking_results(results_df, key_prefix=""):
         },
         hide_index=True,
         use_container_width=True,
-        height=min(800, 100 + len(display_df) * 35),  # Dynamic height based on number of rows
-        key=f"{widget_prefix}results_dataframe"  # Add unique key for the dataframe
+        height=min(800, 100 + len(display_df) * 35)  # Dynamic height based on number of rows
     )
     
-    add_download_buttons(display_df, results_df)
+    add_download_buttons(display_df, results_df, key_prefix=key_prefix)
 
 def process_manual_mode(model_choice):
     """Handle manual upload mode"""
@@ -575,7 +569,7 @@ def process_zoho_mode(model_choice):
 
             # Check if we already have results for this job
             if st.session_state.zoho_results_df is not None:
-                display_ranking_results(st.session_state.zoho_results_df, key_prefix=f"zoho_{job_id}")
+                display_ranking_results(st.session_state.zoho_results_df, key_prefix=f"zoho_{job_id}_existing")
                 
             if st.button("Fetch and Rank Candidates", type="primary"):
                 # Clear previous results and reset state when starting a new fetch
@@ -679,7 +673,7 @@ def process_zoho_mode(model_choice):
                     progress_bar.progress(100, text="✅ Analysis complete!")
                     st.success("Analysis completed successfully!")
                     st.session_state.zoho_results_df = results_df
-                    display_ranking_results(st.session_state.zoho_results_df, key_prefix=f"zoho_{job_id}")
+                    display_ranking_results(st.session_state.zoho_results_df, key_prefix=f"zoho_{job_id}_new")
                     
                     # Show failed downloads if any (separate from OpenAI quota errors)
                     failed_downloads = zoho_candidate_service.get_failed_downloads()
