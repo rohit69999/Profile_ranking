@@ -10,7 +10,6 @@ from ..config.settings import Settings
 import os
 import glob
 import asyncio
-
 # Apply nest_asyncio at the start
 nest_asyncio.apply()
 
@@ -40,8 +39,10 @@ class RankingService:
                 content = self.pdf_parser.parse(file_path)
                 if not content or not content.get("content", "").strip():
                     content = await self.llama_parser.aparse(file_path)
-            else:
+            elif file_path.lower().endswith('.docx'):
                 content = self.docx_parser.parse(file_path)
+            else:
+                content = await self.llama_parser.aparse(file_path) 
 
             if content and content.get("content"):
                 return file_name, content["content"]
@@ -97,12 +98,17 @@ class RankingService:
 
         return resume_texts, file_names
 
-    async def process_resumes_async(self, resume_dir: str, job_description: str) -> pd.DataFrame:
-        """Async version of process_resumes"""
+    async def process_resumes_async(self, resume_dir: str, job_description: str) -> dict:
+        """Async version of process_resumes
+        
+        Returns:
+            dict: A dictionary with either 'data' (DataFrame) on success or 'error' (str) on failure
+        """
         try:
             if not os.path.exists(resume_dir):
-                logging.error(f"Resume directory not found: {resume_dir}")
-                return pd.DataFrame()
+                error_msg = f"Resume directory not found: {resume_dir}"
+                logging.error(error_msg)
+                return {"error": error_msg}
                 
             # Get all files
             file_patterns = [
@@ -116,15 +122,17 @@ class RankingService:
                 all_files.extend(glob.glob(pattern))
 
             if not all_files:
-                logging.warning("No resumes found in the specified directory")
-                return pd.DataFrame()
+                error_msg = "No resumes found in the specified directory"
+                logging.warning(error_msg)
+                return {"error": error_msg}
 
             # Parse files in parallel
             resume_texts, file_names = await self._parse_files_parallel(all_files)
 
             if not resume_texts:
-                logging.warning("No valid content extracted from any resume")
-                return pd.DataFrame()
+                error_msg = "No valid content extracted from any resume"
+                logging.warning(error_msg)
+                return {"error": error_msg}
 
             # Process resumes with rate limiting
             results = await self.llm_service.analyze_resumes_batch_async(
@@ -134,16 +142,41 @@ class RankingService:
                 self.ranking_priority,
                 file_names
             )
+            
+            # Check for quota exceeded error in results
+            if results and isinstance(results, list) and len(results) > 0:
+                first_result = results[0]
+                if first_result.get('error_type') == 'INSUFFICIENT_QUOTA':
+                    error_msg = first_result.get('evaluation', {}).get('explanation', 
+                                    'OpenAI API quota exceeded. Please check your billing details and recharge your account.')
+                    logging.error(f"Quota error: {error_msg}")
+                    return {"error": error_msg, "error_type": "INSUFFICIENT_QUOTA"}
+                elif first_result.get('error_type') == 'AUTH_ERROR':
+                    error_msg = first_result.get('evaluation', {}).get('explanation', 
+                                    'Authentication error with OpenAI API. Please check your API key.')
+                    logging.error(f"Auth error: {error_msg}")
+                    return {"error": error_msg, "error_type": "AUTH_ERROR"}
 
-            return self._create_results_dataframe(results)
+            return {"data": self._create_results_dataframe(results)}
             
         except Exception as e:
-            logging.error(f"Error in process_resumes_async: {str(e)}")
-            return pd.DataFrame()
+            error_msg = f"Error in process_resumes_async: {str(e)}"
+            logging.error(error_msg, exc_info=True)
+            return {"error": error_msg}
             
-    def process_resumes(self, resume_dir: str, job_description: str) -> pd.DataFrame:
-        """Synchronous wrapper for process_resumes_async"""
-        return asyncio.run(self.process_resumes_async(resume_dir, job_description))
+    def process_resumes(self, resume_dir: str, job_description: str) -> dict:
+        """Synchronous wrapper for process_resumes_async
+        
+        Returns:
+            dict: A dictionary with either 'data' (DataFrame) on success or 'error' (str) on failure
+        """
+        try:
+            result = asyncio.run(self.process_resumes_async(resume_dir, job_description))
+            return result
+        except Exception as e:
+            error_msg = f"Error in process_resumes: {str(e)}"
+            logging.error(error_msg, exc_info=True)
+            return {"error": error_msg}
 
     def _create_results_dataframe(self, results: List[Dict]):
         """Create a DataFrame from the results list."""

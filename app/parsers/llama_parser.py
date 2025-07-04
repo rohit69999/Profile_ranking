@@ -4,7 +4,6 @@ import logging
 from typing import Dict
 from .base_parser import BaseParser
 from dotenv import load_dotenv
-import streamlit as st
 
 load_dotenv()
 
@@ -14,7 +13,6 @@ class LlamaParser(BaseParser):
         try:
             # api_key = os.getenv("LLAMA_CLOUD_API_KEY")
             api_key = st.secrets ["LLAMA_CLOUD_API_KEY"]
-
             if not api_key:
                 raise ValueError("Missing Llama Cloud API Key")
 
@@ -48,7 +46,6 @@ class LlamaParser(BaseParser):
         try:
             # api_key = os.getenv("LLAMA_CLOUD_API_KEY")
             api_key = st.secrets ["LLAMA_CLOUD_API_KEY"]
-
             if not api_key:
                 raise ValueError("Missing Llama Cloud API Key")
 

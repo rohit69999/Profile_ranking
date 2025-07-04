@@ -14,7 +14,8 @@ from ..parsers.pypdf_parser import PyPDFParser
 from ..parsers.docx_parser import DocxParser
 from ..parsers.llama_parser import LlamaParser
 from ..config.settings import Settings
-from openai import  RateLimitError
+from openai import RateLimitError, AuthenticationError
+import streamlit as st
 from tenacity import (
     retry,
     stop_after_attempt, 
@@ -22,7 +23,6 @@ from tenacity import (
     wait_random_exponential
 )
 import random
-import streamlit as st
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -58,7 +58,6 @@ class LLMService:
         self.model = model
         # self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.openai_api_key = st.secrets ["OPENAI_API_KEY"]
-
         self.llm = self._initialize_llm()
         self.current_month_year = datetime.today().strftime("%B %Y")
         self.good_characteristics = []
@@ -93,8 +92,9 @@ class LLMService:
                     presence_penalty=0.0,
                     n=1,
                     max_retries=3,
-                    request_timeout=30  # Reduced timeout
+                    request_timeout=30, # Reduced timeout
                 )
+
             
             raise ValueError(f"Unsupported provider: {provider}")
         except ValueError as e:
@@ -146,37 +146,67 @@ class LLMService:
     def analyze_example_resumes(self, good_resumes_dir: str = None, job_description: str = None):
         """Analyze example good resumes to extract characteristics"""
         logging.info("LLMService: Starting example resume analysis")
-        logging.info(f"Good resumes directory: {good_resumes_dir}")
         
-        # Store job description
+        # Reset state
+        self.use_example_resumes = False
+        self.good_characteristics = []
         self.current_job_description = job_description if job_description else "Not provided"
         
-        if good_resumes_dir:
+        if not good_resumes_dir:
+            logging.warning("No good resumes directory provided, skipping analysis")
+            return
+            
+        logging.info(f"Good resumes directory: {good_resumes_dir}")
+        
+        # Verify directory exists and is accessible
+        if not os.path.exists(good_resumes_dir):
+            logging.error(f"Good resumes directory does not exist: {good_resumes_dir}")
+            return
+            
+        if not os.path.isdir(good_resumes_dir):
+            logging.error(f"Path is not a directory: {good_resumes_dir}")
+            return
+            
+        try:
             logging.info(f"Processing example resumes from: {good_resumes_dir}")
             good_text = self._read_resumes_from_dir(good_resumes_dir)
             
-            if good_text:
-                # Count number of resumes being analyzed
-                resume_count = good_text.count("=== Resume:")
-                logging.info(f"Analyzing characteristics from {resume_count} good resumes")
+            if not good_text or not good_text.strip():
+                logging.error("No content was extracted from any resume in the directory")
+                return
                 
-                # Extract characteristics from combined resumes
-                self.good_characteristics = self._analyze_characteristics(good_text, "good")
+            # Count number of resumes being analyzed
+            resume_count = good_text.count("=== Resume:")
+            if resume_count == 0:
+                logging.warning("No resume sections found in the extracted content")
+                return
                 
-                if self.good_characteristics:
-                    self.use_example_resumes = True
-                    logging.info(f"Successfully extracted {len(self.good_characteristics)} characteristics")
-                    logging.info("=== Extracted Good Resume Characteristics ===")
-                    logging.info("=" * 45)
-                else:
-                    logging.error("No characteristics extracted from good resumes")
-                    self.use_example_resumes = False
-            else:
-                logging.error("No content extracted from example resumes")
-                self.use_example_resumes = False
-                self.good_characteristics = []
-        else:
-            logging.warning("Good resumes directory not provided, skipping analysis")
+            logging.info(f"Analyzing characteristics from {resume_count} good resumes")
+            
+            # Log a sample of the extracted text for debugging
+            sample_text = good_text[:500].replace('\n', ' ')
+            logging.debug(f"Sample extracted text (first 500 chars): {sample_text}...")
+            
+            # Extract characteristics from combined resumes
+            self.good_characteristics = self._analyze_characteristics(good_text, "good")
+            
+            if not self.good_characteristics:
+                logging.error("No characteristics could be extracted from the resumes")
+                return
+                
+            self.use_example_resumes = True
+            logging.info(f"Successfully extracted {len(self.good_characteristics)} characteristics")
+            logging.info("=== Extracted Good Resume Characteristics ===")
+            for i, char in enumerate(self.good_characteristics[:10], 1):
+                logging.info(f"{i}. {char}")
+            if len(self.good_characteristics) > 10:
+                logging.info(f"... and {len(self.good_characteristics) - 10} more")
+            logging.info("=" * 45)
+            
+        except Exception as e:
+            logging.error(f"Error analyzing example resumes: {str(e)}", exc_info=True)
+            self.use_example_resumes = False
+            self.good_characteristics = []
 
     def _read_resumes_from_dir(self, directory: str) -> str:
         """Read and concatenate resumes from directory with a limit"""
@@ -184,6 +214,14 @@ class LLMService:
         if not os.path.exists(directory):
             logging.warning(f"Directory not found: {directory}")
             return ""
+        
+        # Log directory contents for debugging
+        try:
+            dir_contents = os.listdir(directory)
+            logging.info(f"Directory contents ({len(dir_contents)} items): {', '.join(dir_contents[:10])}" + 
+                        ("..." if len(dir_contents) > 10 else ""))
+        except Exception as e:
+            logging.warning(f"Could not list directory contents: {str(e)}")
             
         resumes_text = []
         try:
@@ -196,16 +234,31 @@ class LLMService:
                     if f.lower().endswith(('.pdf', '.doc', '.docx'))]
             files.sort()
             
-            # Limit number of files
-            logging.info(f"Processing {len(files)} sample resumes)")
+            if not files:
+                logging.warning(f"No supported files found in directory: {directory}")
+                return ""
+                
+            logging.info(f"Found {len(files)} supported files in directory")
             
             for filename in files:
                 file_path = os.path.join(directory, filename)
                 content = None
                 
+                # Check if file exists and has content
+                if not os.path.exists(file_path):
+                    logging.error(f"File not found: {file_path}")
+                    continue
+                    
+                if os.path.getsize(file_path) == 0:
+                    logging.warning(f"Empty file: {filename}")
+                    continue
+                
                 try:
+                    logging.info(f"Processing file: {filename} (Size: {os.path.getsize(file_path)} bytes)")
+                    
                     if filename.lower().endswith('.pdf'):
                         # Try PyPDF first
+                        logging.debug(f"Trying PyPDF parser for {filename}")
                         content = pdf_parser.parse(file_path)
                         
                         # If PyPDF fails or returns empty content, try LlamaParse
@@ -213,33 +266,55 @@ class LLMService:
                             logging.info(f"PyPDF parser failed for {filename}, trying LlamaParse")
                             content = llama_parser.parse(file_path)
                             
-                    elif filename.lower().endswith(('.doc', '.docx')):
-                        # Try docx parser first
+                    elif filename.lower().endswith('.docx'):
+                        # Try docx parser first for .docx files
+                        logging.debug(f"Trying DOCX parser for {filename}")
                         content = docx_parser.parse(file_path)
                         
                         # If docx parser fails, try LlamaParse
                         if not content or not content.get("content") or not content.get("content").strip():
                             logging.info(f"DOCX parser failed for {filename}, trying LlamaParse")
                             content = llama_parser.parse(file_path)
+                            
+                    elif filename.lower().endswith('.doc'):
+                        # Use LlamaParse directly for .doc files
+                        logging.debug(f"Using LlamaParse for .doc file: {filename}")
+                        content = llama_parser.parse(file_path)
                     
                     # Add successfully parsed content
                     if content and content.get("content") and content.get("content").strip():
                         resumes_text.append(f"=== Resume: {filename} ===\n{content['content']}\n")
                         logging.info(f"Successfully extracted content from {filename} using {content.get('parser_used', 'unknown parser')}")
+                        
+                        # Log first 200 chars for debugging
+                        sample = content['content'][:200].replace('\n', ' ')
+                        logging.debug(f"Sample content from {filename}: {sample}...")
                     else:
                         logging.warning(f"Failed to extract content from {filename} with all parsers")
+                        # Try to read file as text as a last resort
+                        try:
+                            with open(file_path, 'rb') as f:
+                                raw_content = f.read().decode('utf-8', errors='ignore')
+                                if raw_content.strip():
+                                    logging.info(f"Adding raw content from {filename} (fallback)")
+                                    resumes_text.append(f"=== Resume (raw): {filename} ===\n{raw_content}\n")
+                        except Exception as e:
+                            logging.error(f"Failed to read file {filename} as raw text: {str(e)}")
                         
                 except Exception as e:
-                    logging.error(f"Error processing {filename}: {str(e)}")
+                    logging.error(f"Error processing {filename}: {str(e)}", exc_info=True)
                     
             # Combine all resume texts
             combined_text = "\n\n".join(resumes_text)
-            logging.info(f"Successfully combined {len(resumes_text)} resumes")
+            logging.info(f"Successfully processed {len(resumes_text)}/{len(files)} resumes")
+            
+            if not combined_text.strip():
+                logging.warning("No content was extracted from any resume")
             
             return combined_text
                 
         except Exception as e:
-            logging.error(f"Error reading directory {directory}: {str(e)}")
+            logging.error(f"Error reading directory {directory}: {str(e)}", exc_info=True)
             return ""
 
     @retry(
@@ -270,10 +345,22 @@ class LLMService:
             return parsed_result
             
         except RateLimitError as e:
+            error_message = str(e).lower()
+            if 'insufficient_quota' in error_message or 'quota' in error_message:
+                logging.error("Insufficient quota error from OpenAI API")
+                error_response = self._generate_error_response(error_type="INSUFFICIENT_QUOTA")
+                error_response["processing_time"] = round(time.time() - start_time, 2)
+                return error_response
+                
             logging.warning(f"Rate limit hit, waiting before retry: {str(e)}")
             # Reduced jitter range
             await asyncio.sleep(random.uniform(0.5, 2))
             raise
+        except AuthenticationError as e:
+            logging.error(f"Authentication error with OpenAI API: {str(e)}")
+            error_response = self._generate_error_response(error_type="AUTH_ERROR")
+            error_response["processing_time"] = round(time.time() - start_time, 2)
+            return error_response
         except Exception as e:
             logging.error(f"Error in resume analysis: {str(e)}")
             error_response = self._generate_error_response()
@@ -441,13 +528,28 @@ class LLMService:
             logging.error(f"Error in analyze_resumes_batch_async: {str(e)}")
             return [self._generate_error_response() for _ in resume_texts]
 
-    def _generate_error_response(self):
-        """Generate a standardized error response"""
+    def _generate_error_response(self, error_type="GENERIC"):
+        """Generate a standardized error response
+        
+        Args:
+            error_type: Type of error (GENERIC, INSUFFICIENT_QUOTA, AUTH_ERROR)
+        """
+        if error_type == "INSUFFICIENT_QUOTA":
+            explanation = "OpenAI API quota exceeded. Please check your billing details and recharge your account."
+        elif error_type == "AUTH_ERROR":
+            explanation = "Authentication error with OpenAI API. Please check your API key."
+        else:
+            explanation = "Error analyzing resume"
+            
         return {
-            "information": {},
+            "information": {
+                "error_type": error_type
+            },
             "evaluation": {
                 "total_score": 0,
-                "explanation": "Error analyzing resume"
+                "explanation": explanation
             },
-            "processing_time": 0
+            "processing_time": 0,
+            "error": True,
+            "error_type": error_type
         }
