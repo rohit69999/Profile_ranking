@@ -16,20 +16,26 @@ import logging
 import shutil
 import time
 from functools import wraps
+import streamlit as st
 TRACING_ENABLED = False
 try:
     from phoenix.otel import register
     from openinference.instrumentation.openai import OpenAIInstrumentor
 
     # Set environment variables for Phoenix
-    os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"api_key={os.getenv('OTEL_EXPORTER_OTLP_HEADERS')}"
-    os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={os.getenv('PHOENIX_CLIENT_HEADERS')}"
-    os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = os.getenv('PHOENIX_COLLECTOR_ENDPOINT')
+    # os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"api_key={os.getenv('OTEL_EXPORTER_OTLP_HEADERS')}"
+    # os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={os.getenv('PHOENIX_CLIENT_HEADERS')}"
+    # os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = os.getenv('PHOENIX_COLLECTOR_ENDPOINT')
+
+    os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"api_key={st.secrets['OTEL_EXPORTER_OTLP_HEADERS']}"
+    os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={st.secrets['PHOENIX_CLIENT_HEADERS']}"
+    os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = st.secrets['PHOENIX_COLLECTOR_ENDPOINT']
 
     try:
         tracer_provider = register(
             project_name="Profile Ranking System",
-            endpoint=os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT'),
+            # endpoint=os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT'),
+            endpoint=st.secrets['OTEL_EXPORTER_OTLP_ENDPOINT'],
             batch=True,
             auto_instrument=True
         )
