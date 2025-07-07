@@ -14,24 +14,22 @@ import tempfile
 import os
 import logging
 import shutil
+import time
+from functools import wraps
 TRACING_ENABLED = False
 try:
     from phoenix.otel import register
     from openinference.instrumentation.openai import OpenAIInstrumentor
 
     # Set environment variables for Phoenix
-    # os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"api_key={os.getenv('OTEL_EXPORTER_OTLP_HEADERS')}"
-    # os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={os.getenv('PHOENIX_CLIENT_HEADERS')}"
-    # os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = os.getenv('PHOENIX_COLLECTOR_ENDPOINT')
-
-    os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"api_key={st.secrets['OTEL_EXPORTER_OTLP_HEADERS']}"
-    os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={st.secrets['PHOENIX_CLIENT_HEADERS']}"
-    os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = st.secrets['PHOENIX_COLLECTOR_ENDPOINT']
+    os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"api_key={os.getenv('OTEL_EXPORTER_OTLP_HEADERS')}"
+    os.environ["PHOENIX_CLIENT_HEADERS"] = f"api_key={os.getenv('PHOENIX_CLIENT_HEADERS')}"
+    os.environ["PHOENIX_COLLECTOR_ENDPOINT"] = os.getenv('PHOENIX_COLLECTOR_ENDPOINT')
 
     try:
         tracer_provider = register(
             project_name="Profile Ranking System",
-            endpoint=st.secrets['OTEL_EXPORTER_OTLP_ENDPOINT'],
+            endpoint=os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT'),
             batch=True,
             auto_instrument=True
         )
@@ -51,6 +49,60 @@ except ImportError:
 except Exception as e:
     logging.error("Unexpected error during tracing setup", exc_info=True)
     tracer_provider = None
+
+
+def show_relax_message_if_slow(threshold=20):
+    """Decorator to show a relax message if a function takes longer than threshold seconds"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            start_time = time.time()
+            progress_text = None
+            relax_shown = False
+            
+            try:
+                # Create a progress text element
+                progress_text = st.empty()
+                
+                # Run the function in a thread so we can monitor time
+                import threading
+                result = None
+                exception = None
+                
+                def run_func():
+                    nonlocal result, exception
+                    try:
+                        result = func(*args, **kwargs)
+                    except Exception as e:
+                        exception = e
+                
+                thread = threading.Thread(target=run_func)
+                thread.start()
+                
+                # Monitor the time while the function runs
+                while thread.is_alive():
+                    elapsed = time.time() - start_time
+                    if elapsed > threshold and not relax_shown:
+                        progress_text.info(
+                            "🕒 This step is taking longer than expected. "
+                            "Please sit back and relax while we process your data..."
+                        )
+                        relax_shown = True
+                    time.sleep(0.5)
+                
+                thread.join()
+                
+                if exception:
+                    raise exception
+                    
+                return result
+                
+            finally:
+                if progress_text is not None:
+                    progress_text.empty()
+                    
+        return wrapper
+    return decorator
 
 CSS_STYLES = """
 <style>
@@ -389,7 +441,12 @@ def process_manual_mode(model_choice):
                     if good_resumes:
                         num_resumes = len(good_resumes)
                         logging.info(f"Number of good sample resumes uploaded: {num_resumes}")
-                        good_dir = save_uploaded_files(good_resumes)
+                        
+                        @show_relax_message_if_slow(20)
+                        def save_good_resumes():
+                            return save_uploaded_files(good_resumes)
+                        
+                        good_dir = save_good_resumes()
                         logging.info(f"Good resumes saved to directory: {good_dir}")
                     else:
                         logging.info("No good sample resumes uploaded")
@@ -404,11 +461,20 @@ def process_manual_mode(model_choice):
                     
                     if good_dir:
                         logging.info("Analyzing good sample resumes...")
-                        ranker.analyze_example_resumes(good_dir, job_description)
+                        
+                        @show_relax_message_if_slow(20)
+                        def analyze_samples():
+                            ranker.analyze_example_resumes(good_dir, job_description)
+                        
+                        analyze_samples()
                         if not ranker.llm_service.good_characteristics:
                             st.warning("Failed to extract characteristics from good resumes")
                     
-                    result = ranker.process_resumes(temp_dir, job_description)
+                    @show_relax_message_if_slow(20)
+                    def process_resumes():
+                        return ranker.process_resumes(temp_dir, job_description)
+                    
+                    result = process_resumes()
                     
                     if 'error' in result:
                         if result.get('error_type') == 'INSUFFICIENT_QUOTA':
@@ -559,13 +625,12 @@ def process_zoho_mode(model_choice):
             sample_dir = None
             has_samples = False
 
-            with st.expander("Sample Resume Configuration", expanded=False):
-                sample_dir, has_samples = handle_sample_resumes(job_id, job_description)
-                if has_samples:
-                    st.info(
-                        "✨ Sample resumes will be used to identify key characteristics "
-                        "of successful candidates"
-                    )
+            sample_dir, has_samples = handle_sample_resumes(job_id, job_description)
+            if has_samples:
+                st.info(
+                    "✨ Sample resumes will be used to identify key characteristics "
+                    "of successful candidates"
+                )
 
             # Check if we already have results for this job
             if st.session_state.zoho_results_df is not None:
@@ -586,7 +651,11 @@ def process_zoho_mode(model_choice):
                     headers = {"Authorization": f"Zoho-oauthtoken {access_token}"}
                     
                     # Fetch candidates using the job service
-                    candidates = zoho_candidate_service.get_candidates_by_job_id(job_id, headers)
+                    @show_relax_message_if_slow(20)
+                    def fetch_candidates():
+                        return zoho_candidate_service.get_candidates_by_job_id(job_id, headers)
+                    
+                    candidates = fetch_candidates()
 
                     if not candidates:
                         progress_bar.progress(0, text="")
@@ -608,11 +677,15 @@ def process_zoho_mode(model_choice):
                         progress_bar.progress(progress, text=f"📥 Downloaded {current} of {total} resumes...")
                     
                     # Download resumes in parallel with rate limiting
-                    downloaded_files = zoho_candidate_service.batch_download_resumes(
-                        candidates=candidates,
-                        batch_size=50,  # Process 30 candidates per batch
-                        delay=65  # 65 seconds between batches to respect rate limits
-                    )
+                    @show_relax_message_if_slow(20)
+                    def download_resumes():
+                        return zoho_candidate_service.batch_download_resumes(
+                            candidates=candidates,
+                            batch_size=50,
+                            delay=65
+                        )
+                    
+                    downloaded_files = download_resumes()
                     
                     if not downloaded_files:
                         progress_bar.progress(0, text="❌ No resumes were downloaded. Please check if candidates have attached resumes.")
@@ -632,7 +705,11 @@ def process_zoho_mode(model_choice):
                         progress_bar.progress(80, text="🔍 Analyzing sample resumes...")
                         logging.info(f"Processing sample resumes from directory: {sample_dir}")
                         try:
-                            ranker.analyze_example_resumes(sample_dir, job_description)
+                            @show_relax_message_if_slow(20)
+                            def analyze_samples():
+                                ranker.analyze_example_resumes(sample_dir, job_description)
+                            
+                            analyze_samples()
                             if ranker.llm_service.good_characteristics:
                                 progress_bar.progress(85, text="✅ Successfully analyzed sample resumes")
                                 logging.info("Successfully extracted characteristics from samples")
@@ -645,7 +722,12 @@ def process_zoho_mode(model_choice):
                     
                     # Step 5: Process all resumes
                     progress_bar.progress(90, text="📄 Processing candidate resumes...")
-                    result = ranker.process_resumes(temp_dir, job_description)
+                    
+                    @show_relax_message_if_slow(20)
+                    def process_resumes():
+                        return ranker.process_resumes(temp_dir, job_description)
+                    
+                    result = process_resumes()
 
                     # Step 6: Handle the result which could be an error or data
                     if 'error' in result:
